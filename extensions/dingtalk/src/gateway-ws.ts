@@ -319,6 +319,7 @@ export class GatewayWsClient {
    * 发送聊天消息并返回流式响应
    *
    * 改进：
+   * - 真正的流式输出：每次收到 delta 都 yield，而不是等 final
    * - 连接断开时优雅降级，返回已累积的数据而不是抛出错误
    * - 断开时保存进度，重连后可以恢复
    * - 追踪 seq 用于检测事件间隙
@@ -330,12 +331,13 @@ export class GatewayWsClient {
   }): AsyncGenerator<string, void, unknown> {
     const runId = randomUUID();
     let accumulated = "";
+    let lastYieldedLength = 0; // 追踪上次 yield 的长度，用于计算增量
     let done = false;
     let error: Error | null = null;
     let disconnectedWithData = false; // 标记：连接断开但有数据
     const resolvers: Array<() => void> = [];
-    let lastState: ChatEvent["state"] | null = null;
     let lastEventSeq = 0; // 追踪当前会话的最后 seq
+    let hasNewData = false; // 标记是否有新数据需要 yield
 
     // 检查是否有之前断开时保存的进度
     const savedProgress = this.getProgress(params.sessionKey);
@@ -349,8 +351,6 @@ export class GatewayWsClient {
 
     // 注册 chat 事件监听
     this.chatListeners.set(runId, (evt) => {
-      lastState = evt.state;
-
       // 追踪事件 seq
       if (typeof evt.seq === "number") {
         lastEventSeq = evt.seq;
@@ -362,10 +362,13 @@ export class GatewayWsClient {
             ?.filter((c) => c.type === "text")
             .map((c) => c.text ?? "")
             .join("") ?? "";
-        accumulated = text;
 
-        // 每次收到数据都保存进度（用于断开时恢复）
-        if (accumulated.length > 0) {
+        // 只有当内容有变化时才标记有新数据
+        if (text.length > accumulated.length) {
+          accumulated = text;
+          hasNewData = true;
+
+          // 每次收到数据都保存进度（用于断开时恢复）
           this.saveProgress(params.sessionKey, runId, accumulated, lastEventSeq);
         }
       }
@@ -408,7 +411,7 @@ export class GatewayWsClient {
       while (!done) {
         // wait for new data
         await new Promise<void>((resolve) => {
-          if (done) {
+          if (done || hasNewData) {
             resolve();
           } else {
             resolvers.push(resolve);
@@ -417,19 +420,20 @@ export class GatewayWsClient {
 
         // only throw when there is no accumulated data
         if (error && accumulated.length === 0) throw error;
+
+        // 真正的流式输出：yield 增量内容（只输出新增的部分）
+        if (hasNewData && accumulated.length > lastYieldedLength) {
+          const delta = accumulated.slice(lastYieldedLength);
+          yield delta;
+          lastYieldedLength = accumulated.length;
+          hasNewData = false;
+        }
       }
 
-      // only allow final output
-      if (lastState === "final" && accumulated) {
-        yield accumulated;
-      }
-
-      // 如果连接断开但有数据，也输出
-      if (disconnectedWithData && accumulated) {
-        this.logger.info(
-          `[gateway-ws] yielding ${accumulated.length} chars from interrupted stream (lastSeq=${lastEventSeq})`
-        );
-        yield accumulated;
+      // 确保最后的数据也被输出（final 状态可能带有最后一点数据）
+      if (accumulated.length > lastYieldedLength) {
+        const delta = accumulated.slice(lastYieldedLength);
+        yield delta;
       }
 
       if (disconnectedWithData) {
