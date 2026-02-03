@@ -31,6 +31,21 @@ import {
   getWecomRuntime,
 } from "@openclaw-china/wecom";
 import wecomEntry from "@openclaw-china/wecom";
+import {
+  wecomAppPlugin,
+  DEFAULT_ACCOUNT_ID as WECOM_APP_DEFAULT_ACCOUNT_ID,
+  setWecomAppRuntime,
+  getWecomAppRuntime,
+  sendWecomAppMessage,
+  getAccessToken,
+  sendWecomAppMarkdownMessage,
+  stripMarkdown,
+  clearAccessTokenCache,
+  clearAllAccessTokenCache,
+  downloadAndSendImage,
+  sendWecomAppImageMessage,
+} from "@openclaw-china/wecom-app";
+import wecomAppEntry from "@openclaw-china/wecom-app";
 
 export {
   dingtalkPlugin,
@@ -47,6 +62,18 @@ export {
   WECOM_DEFAULT_ACCOUNT_ID,
   setWecomRuntime,
   getWecomRuntime,
+  wecomAppPlugin,
+  WECOM_APP_DEFAULT_ACCOUNT_ID,
+  setWecomAppRuntime,
+  getWecomAppRuntime,
+  sendWecomAppMessage,
+  getAccessToken,
+  sendWecomAppMarkdownMessage,
+  stripMarkdown,
+  clearAccessTokenCache,
+  clearAllAccessTokenCache,
+  downloadAndSendImage,
+  sendWecomAppImageMessage,
 };
 
 export type {
@@ -60,6 +87,15 @@ export type {
   FeishuSendResult,
 } from "@openclaw-china/feishu";
 export type { WecomConfig, ResolvedWecomAccount, WecomInboundMessage } from "@openclaw-china/wecom";
+export type {
+  WecomAppConfig,
+  ResolvedWecomAppAccount,
+  WecomAppInboundMessage,
+  WecomAppDmPolicy,
+  WecomAppGroupPolicy,
+  WecomAppSendTarget,
+  AccessTokenCacheEntry,
+} from "@openclaw-china/wecom-app";
 
 // TODO: 后续添加其他渠道
 // export { qqPlugin } from "@openclaw-china/qq";
@@ -82,6 +118,7 @@ export interface MoltbotConfig {
     dingtalk?: ChannelConfig;
     feishu?: ChannelConfig;
     wecom?: ChannelConfig;
+    "wecom-app"?: ChannelConfig;
     qq?: ChannelConfig;
     [key: string]: ChannelConfig | undefined;
   };
@@ -101,7 +138,7 @@ export interface MoltbotPluginApi {
 /**
  * 支持的渠道列表
  */
-export const SUPPORTED_CHANNELS = ["dingtalk", "feishu", "wecom"] as const;
+export const SUPPORTED_CHANNELS = ["dingtalk", "feishu", "wecom", "wecom-app"] as const;
 // TODO: 后续添加 "qq"
 
 export type SupportedChannel = (typeof SUPPORTED_CHANNELS)[number];
@@ -120,6 +157,11 @@ const channelPlugins: Record<SupportedChannel, { register: (api: MoltbotPluginAp
   wecom: {
     register: (api: MoltbotPluginApi) => {
       wecomEntry.register(api);
+    },
+  },
+  "wecom-app": {
+    register: (api: MoltbotPluginApi) => {
+      wecomAppEntry.register(api);
     },
   },
 };
