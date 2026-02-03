@@ -18,7 +18,49 @@ import {
 } from "./config.js";
 import { registerWecomAppWebhookTarget } from "./monitor.js";
 import { setWecomAppRuntime } from "./runtime.js";
-import { sendWecomAppMessage, stripMarkdown, downloadAndSendImage } from "./api.js";
+import { sendWecomAppMessage, stripMarkdown, downloadAndSendImage, downloadAndSendVoice, downloadAndSendFile } from "./api.js";
+
+/**
+ * 媒体类型
+ */
+type MediaType = "image" | "voice" | "file";
+
+/**
+ * 根据文件路径或 MIME 类型检测媒体类型
+ */
+function detectMediaType(filePath: string, mimeType?: string): MediaType {
+  // 优先使用 MIME 类型
+  if (mimeType) {
+    const mime = mimeType.split(";")[0].trim().toLowerCase();
+    if (mime.startsWith("image/")) {
+      return "image";
+    }
+    if (mime.startsWith("audio/") || mime === "audio/amr") {
+      return "voice";
+    }
+  }
+
+  // 回退到文件扩展名
+  const ext = filePath.toLowerCase().split("?")[0].split(".").pop();
+  if (!ext) {
+    return "file";
+  }
+
+  // 图片扩展名
+  const imageExts = ["jpg", "jpeg", "png", "gif", "bmp", "webp"];
+  if (imageExts.includes(ext)) {
+    return "image";
+  }
+
+  // 语音扩展名
+  const voiceExts = ["amr", "speex", "mp3", "wav"];
+  if (voiceExts.includes(ext)) {
+    return "voice";
+  }
+
+  // 默认作为文件处理
+  return "file";
+}
 
 const meta = {
   id: "wecom-app",
@@ -368,7 +410,7 @@ export const wecomAppPlugin = {
     },
 
     /**
-     * 发送媒体消息（图片）
+     * 发送媒体消息（支持图片、语音、文件）
      * OpenClaw outbound 适配器要求的接口
      */
     sendMedia: async (params: {
@@ -407,13 +449,13 @@ export const wecomAppPlugin = {
       // 解析 to: 支持格式 "wecom-app:user:xxx" / "wecom-app:group:xxx" / "wecom-app:xxx" / "user:xxx" / "group:xxx" / "xxx"
       let to = params.to;
 
-      // 1. 先剥离 channel 前缀 "wecom-app:"
+      //1. 先剥离 channel 前缀 "wecom-app:"
       const channelPrefix = "wecom-app:";
       if (to.startsWith(channelPrefix)) {
         to = to.slice(channelPrefix.length);
       }
 
-      // 2. 解析剩余部分: "group:xxx" / "user:xxx" / "xxx"
+      //2. 解析剩余部分: "group:xxx" / "user:xxx" / "xxx"
       let target: { userId?: string; chatid?: string } = {};
       if (to.startsWith("group:")) {
         target = { chatid: to.slice(6) };
@@ -425,12 +467,28 @@ export const wecomAppPlugin = {
 
       console.log(`[wecom-app] Target parsed:`, target);
 
-      try {
-        // 使用 api.ts 中的 downloadAndSendImage 函数
-        // 流程: 下载图片 → 上传素材 → 发送图片
-        const result = await downloadAndSendImage(account, target, params.mediaUrl);
+      // 3. 检测媒体类型并路由到对应的发送函数
+      const mediaType = detectMediaType(params.mediaUrl, params.mimeType);
+      console.log(`[wecom-app] Detected media type: ${mediaType}, file: ${params.mediaUrl}`);
 
-        console.log(`[wecom-app] downloadAndSendImage returned: ok=${result.ok}, msgid=${result.msgid}, errcode=${result.errcode}, errmsg=${result.errmsg}`);
+      try {
+        let result;
+
+        if (mediaType === "image") {
+          // 图片: 下载 → 上传素材 → 发送
+          console.log(`[wecom-app] Routing to downloadAndSendImage`);
+          result = await downloadAndSendImage(account, target, params.mediaUrl);
+        } else if (mediaType === "voice") {
+          // 语音: 下载 → 上传素材 → 发送
+          console.log(`[wecom-app] Routing to downloadAndSendVoice`);
+          result = await downloadAndSendVoice(account, target, params.mediaUrl);
+        } else {
+          // 文件/其他: 下载 → 上传素材 → 发送
+          console.log(`[wecom-app] Routing to downloadAndSendFile`);
+          result = await downloadAndSendFile(account, target, params.mediaUrl);
+        }
+
+        console.log(`[wecom-app] Media send returned: ok=${result.ok}, msgid=${result.msgid}, errcode=${result.errcode}, errmsg=${result.errmsg}`);
 
         return {
           channel: "wecom-app",

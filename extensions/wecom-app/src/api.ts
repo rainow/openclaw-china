@@ -977,3 +977,200 @@ export async function downloadAndSendVoice(
     };
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 文件消息支持
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 通用上传媒体素材
+ * @param account 账户配置
+ * @param buffer 媒体数据
+ * @param filename 文件名
+ * @param contentType MIME 类型（可选）
+ * @param type 媒体类型: image | voice | video | file
+ * @returns media_id
+ */
+export async function uploadMedia(
+  account: ResolvedWecomAppAccount,
+  buffer: Buffer,
+  filename = "file.bin",
+  contentType?: string,
+  type: "image" | "voice" | "video" | "file" = "file"
+): Promise<string> {
+  if (!account.canSendActive) {
+    throw new Error("Account not configured for active sending");
+  }
+
+  const token = await getAccessToken(account);
+  const boundary = `----FormBoundary${Date.now()}`;
+
+  // 构造 multipart/form-data
+  const header = Buffer.from(
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="media"; filename="${filename}"\r\n` +
+    `Content-Type: ${contentType || "application/octet-stream"}\r\n\r\n`
+  );
+  const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+  const body = Buffer.concat([header, buffer, footer]);
+
+  const resp = await fetch(
+    `https://qyapi.weixin.qq.com/cgi-bin/media/upload?access_token=${encodeURIComponent(token)}&type=${type}`,
+    {
+      method: "POST",
+      body: body,
+      headers: {
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+      },
+    }
+  );
+
+  const data = (await resp.json()) as { errcode?: number; errmsg?: string; media_id?: string };
+
+  if (data.errcode !== undefined && data.errcode !== 0) {
+    throw new Error(`Upload ${type} failed: ${data.errmsg ?? "unknown error"} (errcode=${data.errcode})`);
+  }
+
+  if (!data.media_id) {
+    throw new Error(`Upload ${type} returned empty media_id`);
+  }
+
+  return data.media_id;
+}
+
+/**
+ * 发送文件消息
+ * @param account 账户配置
+ * @param target 发送目标
+ * @param mediaId 文件 media_id
+ */
+export async function sendWecomAppFileMessage(
+  account: ResolvedWecomAppAccount,
+  target: WecomAppSendTarget,
+  mediaId: string
+): Promise<SendMessageResult> {
+  if (!account.canSendActive) {
+    return {
+      ok: false,
+      errcode: -1,
+      errmsg: "Account not configured for active sending (missing corpId, corpSecret, or agentId)",
+    };
+  }
+
+  const token = await getAccessToken(account);
+
+  const payload: Record<string, unknown> = {
+    msgtype: "file",
+    agentid: account.agentId,
+    file: { media_id: mediaId },
+    safe: 0,
+  };
+
+  if (target.chatid) {
+    payload.chatid = target.chatid;
+  } else if (target.userId) {
+    payload.touser = target.userId;
+  } else {
+    return {
+      ok: false,
+      errcode: -1,
+      errmsg: "No target specified (need userId or chatid)",
+    };
+  }
+
+  const resp = await fetch(
+    `https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${encodeURIComponent(token)}`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+
+  const data = (await resp.json()) as SendMessageResult & { errcode?: number };
+
+  return {
+    ok: data.errcode === 0,
+    errcode: data.errcode,
+    errmsg: data.errmsg,
+    invaliduser: data.invaliduser,
+    invalidparty: data.invalidparty,
+    invalidtag: data.invalidtag,
+    msgid: data.msgid,
+  };
+}
+
+/**
+ * 下载文件（支持网络 URL 和本地文件路径）
+ * @param fileUrl 文件 URL 或本地文件路径
+ * @returns 文件 Buffer
+ */
+export async function downloadFile(fileUrl: string): Promise<{ buffer: Buffer; contentType?: string }> {
+  // 判断是网络 URL 还是本地路径
+  if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+    // 网络下载
+    console.log(`[wecom-app] 使用 HTTP fetch 下载文件: ${fileUrl}`);
+    const resp = await fetch(fileUrl);
+    if (!resp.ok) {
+      throw new Error(`Download file failed: HTTP ${resp.status}`);
+    }
+    const arrayBuffer = await resp.arrayBuffer();
+    return {
+      buffer: Buffer.from(arrayBuffer),
+      contentType: resp.headers.get('content-type') || undefined,
+    };
+  } else {
+    // 本地文件读取
+    console.log(`[wecom-app] 使用 fs 读取本地文件: ${fileUrl}`);
+    const fs = await import('fs');
+    const buffer = await fs.promises.readFile(fileUrl);
+    return {
+      buffer,
+      contentType: undefined, // 本地文件不提供 Content-Type，依赖扩展名推断
+    };
+  }
+}
+
+/**
+ * 下载并发送文件（完整流程）
+ * @param account 账户配置
+ * @param target 发送目标
+ * @param fileUrl 文件 URL 或本地文件路径
+ */
+export async function downloadAndSendFile(
+  account: ResolvedWecomAppAccount,
+  target: WecomAppSendTarget,
+  fileUrl: string
+): Promise<SendMessageResult> {
+  try {
+    console.log(`[wecom-app] Downloading file from: ${fileUrl}`);
+
+    // 1. 下载文件
+    const { buffer: fileBuffer, contentType } = await downloadFile(fileUrl);
+    console.log(`[wecom-app] File downloaded, size: ${fileBuffer.length} bytes, contentType: ${contentType || 'unknown'}`);
+
+    // 2. 提取文件扩展名
+    const extMatch = fileUrl.match(/\.([^.]+)$/);
+    const ext = extMatch ? `.${extMatch[1]}` : '.bin';
+    const filename = `file${ext}`;
+
+    // 3. 上传获取 media_id
+    console.log(`[wecom-app] Uploading file to WeCom media API, filename: ${filename}`);
+    const mediaId = await uploadMedia(account, fileBuffer, filename, contentType, "file");
+    console.log(`[wecom-app] File uploaded, media_id: ${mediaId}`);
+
+    // 4. 发送文件消息
+    console.log(`[wecom-app] Sending file to target:`, target);
+    const result = await sendWecomAppFileMessage(account, target, mediaId);
+    console.log(`[wecom-app] File sent, ok: ${result.ok}, msgid: ${result.msgid}, errcode: ${result.errcode}, errmsg: ${result.errmsg}`);
+
+    return result;
+  } catch (err) {
+    console.error(`[wecom-app] downloadAndSendFile error:`, err);
+    return {
+      ok: false,
+      errcode: -1,
+      errmsg: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
