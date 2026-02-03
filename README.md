@@ -110,21 +110,11 @@ pnpm build
 > 📖 **[钉钉企业注册指南](doc/guides/dingtalk/configuration.md)** — 无需材料，5 分钟内完成配置
 
 ```bash
-openclaw config set channels.dingtalk '{
-  "enabled": true,
-  "clientId": "dingxxxxxx",
-  "clientSecret": "your-app-secret",
-  "enableAICard": false
-}' --json
-```
-
-**Windows 用户**（CMD 不支持单引号 JSON）：
-
-```cmd
 openclaw config set channels.dingtalk.enabled true
 openclaw config set channels.dingtalk.clientId dingxxxxxx
 openclaw config set channels.dingtalk.clientSecret your-app-secret
-openclaw config set channels.dingtalk.enableAICard true
+openclaw config set channels.dingtalk.enableAICard false
+openclaw config set gateway.http.endpoints.chatCompletions.enabled true
 ```
 
 **可选高级配置**
@@ -155,20 +145,6 @@ openclaw config set channels.dingtalk.enableAICard true
 企业微信自建应用支持主动发送消息，需要额外配置 `corpId`、`corpSecret`、`agentId`：
 
 ```bash
-openclaw config set channels.wecom-app '{
-  "enabled": true,
-  "webhookPath": "/wecom-app",
-  "token": "your-token",
-  "encodingAESKey": "your-43-char-encoding-aes-key",
-  "corpId": "your-corp-id",
-  "corpSecret": "your-app-secret",
-  "agentId": 1000002
-}' --json
-```
-
-**Windows 用户**（CMD 不支持单引号 JSON）：
-
-```cmd
 openclaw config set channels.wecom-app.enabled true
 openclaw config set channels.wecom-app.webhookPath /wecom-app
 openclaw config set channels.wecom-app.token your-token
@@ -194,12 +170,10 @@ openclaw config set channels.wecom-app.agentId 1000002
 > 企业微信智能机器人（API 模式）通过公网 HTTPS 回调接收消息，仅支持被动回复
 
 ```bash
-openclaw config set channels.wecom '{
-  "enabled": true,
-  "webhookPath": "/wecom",
-  "token": "your-token",
-  "encodingAESKey": "your-43-char-encoding-aes-key"
-}' --json
+openclaw config set channels.wecom.enabled true
+openclaw config set channels.wecom.webhookPath /wecom
+openclaw config set channels.wecom.token your-token
+openclaw config set channels.wecom.encodingAESKey your-43-char-encoding-aes-key
 ```
 
 **注意事项**
@@ -217,13 +191,10 @@ openclaw config set channels.wecom '{
 openclaw:
 
 ```bash
-openclaw config set channels.feishu '{
-  "enabled": true,
-  "appId": "cli_xxxxxx",
-  "appSecret": "your-app-secret",
-  "sendMarkdownAsCard": true
-
-}' --json
+openclaw config set channels.feishu.enabled true
+openclaw config set channels.feishu.appId cli_xxxxxx
+openclaw config set channels.feishu.appSecret your-app-secret
+openclaw config set channels.feishu.sendMarkdownAsCard true
 ```
 
 
