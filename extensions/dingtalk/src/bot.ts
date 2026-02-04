@@ -969,8 +969,70 @@ export async function handleDingtalkMessage(params: {
     }
 
     // 如果�?finalizeInboundContext，使用它
-    const finalizeInboundContext = replyApi?.finalizeInboundContext as ((ctx: InboundContext) => InboundContext) | undefined;
+    const finalizeInboundContext = replyApi?.finalizeInboundContext as
+      | ((ctx: InboundContext) => InboundContext)
+      | undefined;
     const finalCtx = finalizeInboundContext ? finalizeInboundContext(inboundCtx) : inboundCtx;
+
+    // 记录 inbound session，用于 last route（cron/heartbeat 依赖）
+    const channelSession = coreChannel?.session as
+      | {
+          resolveStorePath?: (store: unknown, params: { agentId?: string }) => string | undefined;
+          recordInboundSession?: (params: {
+            storePath: string;
+            sessionKey: string;
+            ctx: unknown;
+            updateLastRoute?: {
+              sessionKey: string;
+              channel: string;
+              to: string;
+              accountId?: string;
+              threadId?: string | number;
+            };
+            onRecordError?: (err: unknown) => void;
+          }) => Promise<void>;
+        }
+      | undefined;
+    const storePath = channelSession?.resolveStorePath?.(
+      (cfg as Record<string, unknown>)?.session?.store,
+      { agentId: (route as Record<string, unknown>)?.agentId as string | undefined },
+    );
+    if (channelSession?.recordInboundSession && storePath) {
+      const mainSessionKeyRaw = (route as Record<string, unknown>)?.mainSessionKey;
+      const mainSessionKey =
+        typeof mainSessionKeyRaw === "string" && mainSessionKeyRaw.trim()
+          ? mainSessionKeyRaw
+          : undefined;
+      const updateLastRoute =
+        !isGroup && mainSessionKey
+          ? {
+              sessionKey: mainSessionKey,
+              channel: "dingtalk",
+              to:
+                ((finalCtx as { OriginatingTo?: string }).OriginatingTo ??
+                  (finalCtx as { To?: string }).To ??
+                  `user:${ctx.senderId}`) as string,
+              accountId: (route as Record<string, unknown>)?.accountId as string | undefined,
+            }
+          : undefined;
+
+      const recordSessionKeyRaw =
+        (finalCtx as { SessionKey?: string }).SessionKey ?? (route as { sessionKey?: string }).sessionKey;
+      const recordSessionKey =
+        typeof recordSessionKeyRaw === "string" && recordSessionKeyRaw.trim()
+          ? recordSessionKeyRaw
+          : String(recordSessionKeyRaw ?? "");
+
+      await channelSession.recordInboundSession({
+        storePath,
+        sessionKey: recordSessionKey,
+        ctx: finalCtx,
+        updateLastRoute,
+        onRecordError: (err: unknown) => {
+          logger.error(`dingtalk: failed updating session meta: ${String(err)}`);
+        },
+      });
+    }
 
     const dingtalkCfgResolved = channelCfg;
     if (!dingtalkCfgResolved) {
