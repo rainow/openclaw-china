@@ -384,21 +384,21 @@ curl ifconfig.me
 
 ## （可选）安装 wecom-app 运维/使用 Skill
 
-本仓库提供本地技能包：`skills/wecom-app-ops`，用于指导 wecom-app 常见操作（如何获取/规范化 target、如何回发图片/录音/文件、如何使用 saved 路径做 OCR、常见报错排障等）。
+本仓库提供本地技能包：`extensions/wecom-app/skills/wecom-app-ops`，用于指导 wecom-app 常见操作（如何获取/规范化 target、如何回发图片/录音/文件、如何使用 saved 路径做 OCR、常见报错排障等）。
 
 **安装到 Workspace（推荐）**
 
 ```bash
 # 在你的 OpenClaw workspace 目录下执行
 mkdir -p ./skills
-cp -a /path/to/openclaw-china/skills/wecom-app-ops ./skills/
+cp -a /path/to/openclaw-china/extensions/wecom-app/skills/wecom-app-ops ./skills/
 ```
 
 **安装到全局**
 
 ```bash
 mkdir -p ~/.openclaw/skills
-cp -a /path/to/openclaw-china/skills/wecom-app-ops ~/.openclaw/skills/
+cp -a /path/to/openclaw-china/extensions/wecom-app/skills/wecom-app-ops ~/.openclaw/skills/
 ```
 
 复制后无需重启网关；下次你在对话里提出相关需求时会自动触发。
