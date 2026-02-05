@@ -41,6 +41,16 @@ const WecomAppAccountSchema = z.object({
     })
     .optional(),
 
+  // 语音发送策略（可选）：当遇到不支持的格式（如 wav/mp3）时，
+  // - enabled=true 且系统存在 ffmpeg：自动转码为 amr 后再发送 voice
+  // - 否则：降级为 file 发送（并可配合 caption 提示）
+  voiceTranscode: z
+    .object({
+      enabled: z.boolean().optional(),
+      prefer: z.enum(["amr"]).optional(),
+    })
+    .optional(),
+
   // 其他字段
   welcomeText: z.string().optional(),
   dmPolicy: z.enum(["open", "pairing", "allowlist", "disabled"]).optional(),
@@ -79,6 +89,14 @@ export const WecomAppConfigJsonSchema = {
           dir: { type: "string" },
           maxBytes: { type: "number" },
           keepDays: { type: "number" },
+        },
+      },
+      voiceTranscode: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          enabled: { type: "boolean" },
+          prefer: { type: "string", enum: ["amr"] },
         },
       },
       welcomeText: { type: "string" },

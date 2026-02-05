@@ -19,6 +19,7 @@ import {
 import { registerWecomAppWebhookTarget } from "./monitor.js";
 import { setWecomAppRuntime } from "./runtime.js";
 import { sendWecomAppMessage, stripMarkdown, downloadAndSendImage, downloadAndSendVoice, downloadAndSendFile } from "./api.js";
+import { hasFfmpeg, transcodeToAmr } from "./ffmpeg.js";
 
 /**
  * 媒体类型
@@ -502,8 +503,54 @@ export const wecomAppPlugin = {
           result = await downloadAndSendImage(account, target, params.mediaUrl);
         } else if (mediaType === "voice") {
           // 语音: 下载 → 上传素材 → 发送
+          // 策略：遇到 wav/mp3 这类企业微信 voice 不支持的格式时：
+          // - voiceTranscode.enabled=true 且系统存在 ffmpeg：自动转码为 amr 后再发送 voice
+          // - 否则：降级为 file 发送（保证可达）
           console.log(`[wecom-app] Routing to downloadAndSendVoice`);
-          result = await downloadAndSendVoice(account, target, params.mediaUrl);
+
+          const voiceUrl = params.mediaUrl;
+          const ext = (voiceUrl.split("?")[0].match(/\.([^.]+)$/)?.[1] || "").toLowerCase();
+          const likelyUnsupported = ext === "wav" || ext === "mp3";
+          const transcodeEnabled = Boolean(account.config.voiceTranscode?.enabled);
+
+          if (likelyUnsupported && transcodeEnabled) {
+            const can = await hasFfmpeg();
+            if (can) {
+              try {
+                if (!voiceUrl.startsWith("http://") && !voiceUrl.startsWith("https://")) {
+                  const os = await import("node:os");
+                  const path = await import("node:path");
+                  const fs = await import("node:fs");
+                  const out = path.join(os.tmpdir(), `wecom-app-voice-${Date.now()}.amr`);
+
+                  console.log(`[wecom-app] voiceTranscode: ffmpeg available, transcoding ${voiceUrl} -> ${out}`);
+                  await transcodeToAmr({ inputPath: voiceUrl, outputPath: out });
+
+                  result = await downloadAndSendVoice(account, target, out);
+
+                  try {
+                    await fs.promises.unlink(out);
+                  } catch {
+                    // ignore
+                  }
+                } else {
+                  console.warn(`[wecom-app] voiceTranscode enabled but mediaUrl is remote; fallback to file send (download once is not implemented yet)`);
+                  result = await downloadAndSendFile(account, target, voiceUrl);
+                }
+              } catch (e) {
+                console.warn(`[wecom-app] voiceTranscode failed; fallback to file send:`, e);
+                result = await downloadAndSendFile(account, target, voiceUrl);
+              }
+            } else {
+              console.warn(`[wecom-app] voiceTranscode enabled but ffmpeg not found; fallback to file send`);
+              result = await downloadAndSendFile(account, target, voiceUrl);
+            }
+          } else if (likelyUnsupported) {
+            console.log(`[wecom-app] Voice format .${ext} likely unsupported; fallback to file send`);
+            result = await downloadAndSendFile(account, target, voiceUrl);
+          } else {
+            result = await downloadAndSendVoice(account, target, voiceUrl);
+          }
         } else {
           // 文件/其他: 下载 → 上传素材 → 发送
           // NOTE: 企业微信“文件消息”接口只接收 media_id，客户端经常不展示真实文件名。
