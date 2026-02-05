@@ -138,7 +138,22 @@ openclaw plugins list
 
 ### 2. 填写服务器配置
 
-- **URL**：你的公网回调地址，例如 `https://your.domain/wecom-app`
+- **URL**：OpenClaw Gateway 的公网访问地址（企业微信会向这个地址发送消息回调）
+
+  **格式**：`<协议>://<域名或IP>:<端口>/<路径>`
+
+  **示例**：
+  - 使用域名（推荐）：`https://your.domain.com/wecom-app`
+  - 使用 IP 地址：`http://123.45.67.89:18789/wecom-app`
+
+  **说明**：
+  - **协议**：如果有域名和 SSL 证书，使用 `https://`；否则使用 `http://`
+  - **域名/IP**：填写你服务器的公网域名或公网 IP 地址
+  - **端口**：填写 OpenClaw Gateway 监听的端口（默认 `18789`）
+  - **路径**：必须与配置文件中的 `webhookPath` 一致（默认 `/wecom-app`）
+
+  > 💡 **如何获取公网 IP**：在服务器上运行 `curl ifconfig.me` 或访问 [ifconfig.me](https://ifconfig.me)
+
 - **Token**：自定义一个字符串，例如 `your-random-token`
 - **EncodingAESKey**：点击「随机获取」生成 43 位字符
 
