@@ -253,10 +253,12 @@ cp -a /path/to/openclaw-china/skills/wecom-app-ops ~/.openclaw/skills/
 openclaw config set channels.qqbot.enabled true
 openclaw config set channels.qqbot.appId your-app-id
 openclaw config set channels.qqbot.clientSecret your-app-secret
-openclaw config set channels.qqbot.markdownSupport true
+openclaw config set channels.qqbot.markdownSupport false
 ```
 
 </details>
+
+MarkDown需申请相关权限。
 
 <details>
 <summary><strong>企业微信（智能机器人）</strong></summary>
