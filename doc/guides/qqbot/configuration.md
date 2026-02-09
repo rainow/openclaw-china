@@ -205,3 +205,14 @@ openclaw config set channels.qqbot.asr.secretId your-tencent-secret-id
 openclaw config set channels.qqbot.asr.secretKey your-tencent-secret-key
 ```
 
+
+
+
+
+### 4. 计费文档
+
+请仔细查看腾讯云计费文档。
+
+https://cloud.tencent.com/document/product/1093/35686?from=console_document_search#58abe873-a924-4b4d-b056-59510b66c4d3
+
+![image-20260209232053703](D:\work\code\moltbot-china\doc\images\image-20260209232053703.png)
