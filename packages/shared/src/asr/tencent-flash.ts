@@ -1,13 +1,24 @@
 import { createHmac } from "node:crypto";
+import {
+  ASRAuthError,
+  ASREmptyResultError,
+  ASRRequestError,
+  ASRResponseParseError,
+  ASRServiceError,
+  ASRTimeoutError,
+} from "./errors.js";
 
 const ASR_FLASH_HOST = "asr.cloud.tencent.com";
 const ASR_FLASH_PATH_PREFIX = "/asr/flash/v1";
 const ASR_FLASH_URL_PREFIX = `https://${ASR_FLASH_HOST}${ASR_FLASH_PATH_PREFIX}`;
+const ASR_PROVIDER = "tencent-flash";
 
 export interface TencentFlashASRConfig {
   appId: string;
   secretId: string;
   secretKey: string;
+  engineType?: string;
+  voiceFormat?: string;
   timeoutMs?: number;
 }
 
@@ -23,7 +34,6 @@ interface TencentFlashResponseItem {
 interface TencentFlashResponse {
   code?: number;
   message?: string;
-  request_id?: string;
   flash_result?: TencentFlashResponseItem[];
 }
 
@@ -66,11 +76,13 @@ export async function transcribeTencentFlash(params: {
 }): Promise<string> {
   const { audio, config } = params;
   const timestamp = Math.floor(Date.now() / 1000).toString();
+  const engineType = config.engineType ?? "16k_zh";
+  const voiceFormat = config.voiceFormat ?? "silk";
   const query = buildSignedQuery({
-    engine_type: "16k_zh",
+    engine_type: engineType,
     secretid: config.secretId,
     timestamp,
-    voice_format: "silk",
+    voice_format: voiceFormat,
   });
 
   const signText = `POST${ASR_FLASH_HOST}${ASR_FLASH_PATH_PREFIX}/${config.appId}?${query}`;
@@ -96,28 +108,57 @@ export async function transcribeTencentFlash(params: {
     try {
       payload = JSON.parse(bodyText) as TencentFlashResponse;
     } catch {
-      throw new Error(`QQBot ASR response is not valid JSON: ${bodyText.slice(0, 300)}`);
+      throw new ASRResponseParseError(ASR_PROVIDER, bodyText.slice(0, 300));
     }
 
     if (!response.ok) {
       const message = payload.message ?? `HTTP ${response.status}`;
-      throw new Error(`QQBot ASR request failed: ${message}`);
+      if (response.status === 401 || response.status === 403) {
+        throw new ASRAuthError(
+          ASR_PROVIDER,
+          `Tencent Flash ASR authentication failed: ${message}`,
+          response.status
+        );
+      }
+      throw new ASRRequestError(
+        ASR_PROVIDER,
+        `Tencent Flash ASR request failed: ${message}`,
+        response.status
+      );
     }
 
     if (payload.code !== 0) {
-      throw new Error(`QQBot ASR failed: ${payload.message ?? "unknown error"} (code=${payload.code})`);
+      throw new ASRServiceError(
+        ASR_PROVIDER,
+        `Tencent Flash ASR failed: ${payload.message ?? "unknown error"} (code=${payload.code})`
+        ,
+        payload.code
+      );
     }
 
     const transcript = extractTranscript(payload);
     if (!transcript) {
-      throw new Error("QQBot ASR returned empty transcript");
+      throw new ASREmptyResultError(ASR_PROVIDER);
     }
     return transcript;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`QQBot ASR request timeout after ${timeoutMs}ms`);
+      throw new ASRTimeoutError(ASR_PROVIDER, timeoutMs);
     }
-    throw error;
+    if (
+      error instanceof ASRResponseParseError ||
+      error instanceof ASRAuthError ||
+      error instanceof ASRRequestError ||
+      error instanceof ASRServiceError ||
+      error instanceof ASREmptyResultError ||
+      error instanceof ASRTimeoutError
+    ) {
+      throw error;
+    }
+    throw new ASRRequestError(
+      ASR_PROVIDER,
+      `Tencent Flash ASR request failed: ${error instanceof Error ? error.message : String(error)}`
+    );
   } finally {
     clearTimeout(timeoutId);
   }

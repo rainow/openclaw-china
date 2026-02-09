@@ -11,8 +11,10 @@ import {
   fetchMediaFromUrl,
   type Logger,
   appendCronHiddenPrompt,
+  ASRError,
   extractMediaFromText,
   isImagePath,
+  transcribeTencentFlash,
 } from "@openclaw-china/shared";
 import {
   QQBotConfigSchema,
@@ -21,7 +23,6 @@ import {
 } from "./config.js";
 import { qqbotOutbound } from "./outbound.js";
 import { getQQBotRuntime } from "./runtime.js";
-import { transcribeTencentFlash } from "./asr/tencent-flash.js";
 import type {
   InboundContext,
   QQInboundAttachment,
@@ -236,7 +237,13 @@ async function resolveInboundAttachmentsForAgent(params: {
             );
           }
         } catch (err) {
-          logger.warn(`voice ASR failed: ${String(err)}`);
+          if (err instanceof ASRError) {
+            logger.warn(
+              `voice ASR failed: kind=${err.kind} provider=${err.provider} retryable=${err.retryable} message=${err.message}`
+            );
+          } else {
+            logger.warn(`voice ASR failed: ${String(err)}`);
+          }
         }
       }
     }
