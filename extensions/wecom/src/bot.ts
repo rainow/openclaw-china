@@ -285,6 +285,10 @@ export async function dispatchWecomMessage(params: {
       [key: string]: unknown;
     };
 
+    // DM/group policy already passed above, so commands are eligible for this sender.
+    // Without this flag, OpenClaw finalizer defaults CommandAuthorized to false.
+    ctxPayload.CommandAuthorized = true;
+
     if (channel.session?.recordInboundSession && storePath) {
       await channel.session.recordInboundSession({
         storePath,

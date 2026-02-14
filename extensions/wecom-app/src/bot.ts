@@ -567,6 +567,10 @@ export async function dispatchWecomAppMessage(params: {
     [key: string]: unknown;
   };
 
+  // DM policy passed above, so commands from this sender are eligible.
+  // Without this flag, OpenClaw defaults CommandAuthorized to false.
+  ctxPayload.CommandAuthorized = true;
+
   let cronBase = "";
   if (typeof ctxPayload.RawBody === "string" && ctxPayload.RawBody) {
     cronBase = ctxPayload.RawBody;
