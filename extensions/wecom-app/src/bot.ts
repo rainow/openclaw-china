@@ -75,6 +75,12 @@ function buildVoiceASRFallbackReply(errorMessage?: string): string {
   return `${VOICE_ASR_FALLBACK_TEXT}\n\n接口错误：${trimTextForReply(detail, VOICE_ASR_ERROR_MAX_LENGTH)}`;
 }
 
+function normalizeLocationValue(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+
 /**
  * 提取消息内容
  */
@@ -113,6 +119,49 @@ export function extractWecomAppContent(msg: WecomAppInboundMessage): string {
   if (msgtype === "file") {
     const url = String((msg as { file?: { url?: string } }).file?.url ?? "").trim();
     return url ? `[file] ${url}` : "[file]";
+  }
+  if (msgtype === "location") {
+    const payload = msg as {
+      Location_X?: unknown;
+      Location_Y?: unknown;
+      Scale?: unknown;
+      Label?: unknown;
+      Poiname?: unknown;
+      Latitude?: unknown;
+      Longitude?: unknown;
+      Precision?: unknown;
+      location?: {
+        latitude?: unknown;
+        longitude?: unknown;
+        lat?: unknown;
+        lng?: unknown;
+        scale?: unknown;
+        label?: unknown;
+        address?: unknown;
+        name?: unknown;
+        precision?: unknown;
+      };
+    };
+    const location = payload.location;
+
+    const lat = normalizeLocationValue(
+      location?.latitude ?? location?.lat ?? payload.Location_X ?? payload.Latitude
+    );
+    const lon = normalizeLocationValue(
+      location?.longitude ?? location?.lng ?? payload.Location_Y ?? payload.Longitude
+    );
+    const label = normalizeLocationValue(
+      location?.label ?? location?.address ?? location?.name ?? payload.Label ?? payload.Poiname
+    );
+    const scale = normalizeLocationValue(
+      location?.scale ?? location?.precision ?? payload.Scale ?? payload.Precision
+    );
+
+    const parts: string[] = [];
+    if (lat && lon) parts.push(`${lat},${lon}`);
+    if (label) parts.push(label);
+    if (scale) parts.push(`scale=${scale}`);
+    return parts.length ? `[location] ${parts.join(" ")}` : "[location]";
   }
   if (msgtype === "event") {
     const eventtype = String(

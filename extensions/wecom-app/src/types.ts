@@ -177,6 +177,30 @@ export type WecomAppInboundImage = WecomAppInboundBase & {
   MediaId?: string;
 };
 
+export type WecomAppInboundLocation = WecomAppInboundBase & {
+  msgtype: "location";
+  MsgType?: "location";
+  Location_X?: string | number;
+  Location_Y?: string | number;
+  Scale?: string | number;
+  Label?: string;
+  Poiname?: string;
+  Latitude?: string | number;
+  Longitude?: string | number;
+  Precision?: string | number;
+  location?: {
+    latitude?: string | number;
+    longitude?: string | number;
+    lat?: string | number;
+    lng?: string | number;
+    scale?: string | number;
+    precision?: string | number;
+    label?: string;
+    address?: string;
+    name?: string;
+  };
+};
+
 export type WecomAppInboundEvent = WecomAppInboundBase & {
   msgtype: "event";
   MsgType?: "event";
@@ -198,6 +222,7 @@ export type WecomAppInboundMessage =
   | WecomAppInboundText
   | WecomAppInboundVoice
   | WecomAppInboundImage
+  | WecomAppInboundLocation
   | WecomAppInboundStreamRefresh
   | WecomAppInboundEvent
   | (WecomAppInboundBase & Record<string, unknown>);

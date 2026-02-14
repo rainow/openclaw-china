@@ -166,14 +166,14 @@ async function readRawBody(req: IncomingMessage, maxBytes: number) {
 function parseXmlBody(xml: string): Record<string, string> {
   const result: Record<string, string> = {};
   // 匹配 CDATA 格式: <Tag><![CDATA[value]]></Tag>
-  const cdataRegex = /<(\w+)><!\[CDATA\[([\s\S]*?)\]\]><\/\1>/g;
+  const cdataRegex = /<([\w:-]+)><!\[CDATA\[([\s\S]*?)\]\]><\/\1>/g;
   let match: RegExpExecArray | null;
   while ((match = cdataRegex.exec(xml)) !== null) {
     const [, key, value] = match;
     result[key!] = value!;
   }
   // 匹配简单格式: <Tag>value</Tag>
-  const simpleRegex = /<(\w+)>([^<]*)<\/\1>/g;
+  const simpleRegex = /<([\w:-]+)>([^<]*)<\/\1>/g;
   while ((match = simpleRegex.exec(xml)) !== null) {
     const [, key, value] = match;
     if (!result[key!]) {
@@ -289,6 +289,25 @@ function parseWecomAppPlainMessage(raw: string): WecomAppInboundMessage {
       // voice fields
       Recognition: xmlData.Recognition,
       Format: xmlData.Format,
+      // location fields (MsgType=location)
+      Location_X: xmlData.Location_X,
+      Location_Y: xmlData.Location_Y,
+      Scale: xmlData.Scale,
+      Label: xmlData.Label,
+      Poiname: xmlData.Poiname,
+      // location event fields (Event=LOCATION)
+      Latitude: xmlData.Latitude,
+      Longitude: xmlData.Longitude,
+      Precision: xmlData.Precision,
+      location:
+        xmlData.Location_X || xmlData.Location_Y || xmlData.Label || xmlData.Scale
+          ? {
+              latitude: xmlData.Location_X,
+              longitude: xmlData.Location_Y,
+              label: xmlData.Label || xmlData.Poiname,
+              scale: xmlData.Scale,
+            }
+          : undefined,
       // 事件类型
       Event: xmlData.Event,
     } as WecomAppInboundMessage;
