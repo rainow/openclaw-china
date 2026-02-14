@@ -236,6 +236,12 @@ openclaw config set channels.wecom-app.apiBaseUrl https://wecom-proxy.example.co
       "corpSecret": "your-app-secret",
       "agentId": 1000002,
       "apiBaseUrl": "https://wecom-proxy.example.com",
+      "asr": {
+        "enabled": true,
+        "appId": "your-tencent-app-id",
+        "secretId": "your-tencent-secret-id",
+        "secretKey": "your-tencent-secret-key"
+      },
       "inboundMedia": {
         "enabled": true,
         "maxBytes": 10485760,
@@ -259,6 +265,12 @@ openclaw config set channels.wecom-app.apiBaseUrl https://wecom-proxy.example.co
 | `agentId`               |  ✅  | 应用的 AgentId                                                          |
 | `apiBaseUrl`            |  ❌  | 企业微信 API 基础地址；默认 `https://qyapi.weixin.qq.com`，可改为 VPS 代理地址 |
 | `welcomeText`           |  ❌  | 用户首次进入时的欢迎语                                                  |
+| `asr.enabled`           |  ❌  | 是否启用语音转文本（腾讯云 Flash ASR）                                  |
+| `asr.appId`             |  ❌  | 腾讯云 ASR AppID                                                        |
+| `asr.secretId`          |  ❌  | 腾讯云 ASR SecretId                                                     |
+| `asr.secretKey`         |  ❌  | 腾讯云 ASR SecretKey                                                    |
+| `asr.engineType`        |  ❌  | ASR 引擎类型，默认 `16k_zh`                                             |
+| `asr.timeoutMs`         |  ❌  | ASR 请求超时（毫秒），默认 `30000`                                      |
 | `inboundMedia.enabled`  |  ❌  | 是否启用入站媒体落盘（默认启用）                                        |
 | `inboundMedia.dir`      |  ❌  | 入站媒体归档目录（跨平台默认：`~/.openclaw/media/wecom-app/inbound`） |
 | `inboundMedia.maxBytes` |  ❌  | 单个入站媒体最大字节数（默认 10MB）                                     |
@@ -308,6 +320,65 @@ openclaw gateway restart
 ![微信插件](image/configuration/1770110656555.png)
 
 用个人微信扫码「邀请关注」的二维码就可以在个人微信上打开入口
+
+---
+
+## 步骤七（可选）：开启语音转文本（ASR）
+
+如果你希望企业微信语音消息自动转文字后再交给 Agent 处理，可按下面步骤配置腾讯云 ASR（录音文件识别极速版）。
+
+### 1. 开通 ASR 服务
+
+访问腾讯云语音识别产品页并点击“立即使用”：  
+https://cloud.tencent.com/product/asr
+
+说明：腾讯云 ASR 提供每月免费额度（以腾讯云控制台最新计费规则为准），额度如下：
+- 录音文件识别极速版（`asr/flash/v1`）：5 小时/月
+
+![qq-asr-free-quota](../../images/qq-asr-free-quota.png)
+
+### 2. 创建 API 密钥
+
+进入腾讯云控制台语音识别页（或对应 API 密钥管理页）创建密钥，获取：
+- `appId`
+- `secretId`
+- `secretKey`
+
+控制台入口：  
+https://console.cloud.tencent.com/asr
+
+![qq-asr-console-entry](../../images/qq-asr-console-entry.png)
+
+![qq-asr-api-keys](../../images/qq-asr-api-keys.png)
+
+### 3. 在 OpenClaw 中配置
+
+默认账号：
+
+```bash
+openclaw config set channels.wecom-app.asr.enabled true
+openclaw config set channels.wecom-app.asr.appId your-tencent-app-id
+openclaw config set channels.wecom-app.asr.secretId your-tencent-secret-id
+openclaw config set channels.wecom-app.asr.secretKey your-tencent-secret-key
+```
+
+多账号（示例：`app1`）：
+
+```bash
+openclaw config set channels.wecom-app.accounts.app1.asr.enabled true
+openclaw config set channels.wecom-app.accounts.app1.asr.appId your-tencent-app-id
+openclaw config set channels.wecom-app.accounts.app1.asr.secretId your-tencent-secret-id
+openclaw config set channels.wecom-app.accounts.app1.asr.secretKey your-tencent-secret-key
+```
+
+
+### 4. 计费文档
+
+请仔细查看腾讯云计费文档。
+
+https://cloud.tencent.com/document/product/1093/35686?from=console_document_search#58abe873-a924-4b4d-b056-59510b66c4d3
+
+![qq-asr-pricing-doc](../../images/qq-asr-pricing-doc.png)
 
 ---
 

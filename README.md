@@ -205,6 +205,15 @@ openclaw config set channels.wecom-app.corpSecret your-app-secret
 openclaw config set channels.wecom-app.agentId 1000002
 ```
 
+（可选）开启语音转文本（腾讯云 Flash ASR）：
+
+```bash
+openclaw config set channels.wecom-app.asr.enabled true
+openclaw config set channels.wecom-app.asr.appId your-tencent-app-id
+openclaw config set channels.wecom-app.asr.secretId your-tencent-secret-id
+openclaw config set channels.wecom-app.asr.secretKey your-tencent-secret-key
+```
+
 **与智能机器人的区别**
 
 | 功能 | 智能机器人 (wecom) | 自建应用 (wecom-app) |
@@ -221,6 +230,7 @@ openclaw config set channels.wecom-app.agentId 1000002
 - 入站：支持 JSON/XML 回调、验签与解密、长文本分片（2048 bytes）、stream 占位/刷新（5s 规则下缓冲）。
 - 入站媒体：image/voice/file/mixed 自动落盘，消息体写入 `saved:` 稳定路径；按 `keepDays` 延迟清理。
   - 设计动机：避免使用 `/tmp` 造成"收到后很快被清理"，确保 OCR/MCP/回发等二次处理有稳定路径可依赖。
+- 语音识别：支持接入腾讯云 Flash ASR（录音文件识别极速版）将语音转写为文本。
 - 出站：支持主动发送文本与媒体；支持 markdown→纯文本降级（stripMarkdown）。
 - 路由与目标：支持多种 target 解析（`wecom-app:user:..` / `user:..` / 裸 id / `@accountId`），减少 Unknown target。
 - 策略与多账号：支持 defaultAccount/accounts；dmPolicy/allowlist；inboundMedia(开关/dir/maxBytes/keepDays)。
@@ -260,6 +270,15 @@ openclaw config set channels.qqbot.enabled true
 openclaw config set channels.qqbot.appId your-app-id
 openclaw config set channels.qqbot.clientSecret your-app-secret
 openclaw config set channels.qqbot.markdownSupport false
+```
+
+（可选）开启语音转文本（腾讯云 Flash ASR）：
+
+```bash
+openclaw config set channels.qqbot.asr.enabled true
+openclaw config set channels.qqbot.asr.appId your-tencent-app-id
+openclaw config set channels.qqbot.asr.secretId your-tencent-secret-id
+openclaw config set channels.qqbot.asr.secretKey your-tencent-secret-key
 ```
 
 </details>

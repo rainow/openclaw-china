@@ -6,15 +6,19 @@
  */
 
 import {
+  ASRError,
   checkDmPolicy,
   createLogger,
+  transcribeTencentFlash,
   type Logger,
 } from "@openclaw-china/shared";
+import { readFile } from "node:fs/promises";
 
 import type { PluginRuntime } from "./runtime.js";
 import type { ResolvedWecomAppAccount, WecomAppInboundMessage, WecomAppDmPolicy } from "./types.js";
 import {
   resolveAllowFrom,
+  resolveWecomAppASRCredentials,
   resolveDmPolicy,
   resolveInboundMediaEnabled,
   resolveInboundMediaMaxBytes,
@@ -33,6 +37,43 @@ export type WecomAppDispatchHooks = {
   onChunk: (text: string) => void;
   onError?: (err: unknown) => void;
 };
+
+function resolveVoiceFormat(msg: WecomAppInboundMessage, savedPath: string): string {
+  const declared = String((msg as { Format?: string }).Format ?? "").trim().toLowerCase();
+  if (declared === "amr" || declared === "speex") return declared;
+  const lowerPath = savedPath.toLowerCase();
+  if (lowerPath.endsWith(".speex")) return "speex";
+  if (lowerPath.endsWith(".amr")) return "amr";
+  return "silk";
+}
+
+function formatASRErrorLog(err: unknown): string {
+  if (err instanceof ASRError) {
+    return JSON.stringify({
+      kind: err.kind,
+      provider: err.provider,
+      retryable: err.retryable,
+      message: err.message,
+    });
+  }
+  return JSON.stringify({
+    message: err instanceof Error ? err.message : String(err),
+  });
+}
+
+const VOICE_ASR_FALLBACK_TEXT = "当前语音功能未启动或识别失败，请稍后重试。";
+const VOICE_ASR_ERROR_MAX_LENGTH = 500;
+
+function trimTextForReply(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function buildVoiceASRFallbackReply(errorMessage?: string): string {
+  const detail = errorMessage?.trim();
+  if (!detail) return VOICE_ASR_FALLBACK_TEXT;
+  return `${VOICE_ASR_FALLBACK_TEXT}\n\n接口错误：${trimTextForReply(detail, VOICE_ASR_ERROR_MAX_LENGTH)}`;
+}
 
 /**
  * 提取消息内容
@@ -95,8 +136,9 @@ export async function enrichInboundContentWithMedia(params: {
   cfg: PluginConfig;
   account: ResolvedWecomAppAccount;
   msg: WecomAppInboundMessage;
-}): Promise<{ text: string; mediaPaths: string[]; cleanup: () => Promise<void> }> {
-  const { account, msg } = params;
+  logger?: Logger;
+}): Promise<{ text: string; mediaPaths: string[]; asrErrorMessage?: string; cleanup: () => Promise<void> }> {
+  const { account, msg, logger } = params;
   const msgtype = String(msg.msgtype ?? msg.MsgType ?? "").toLowerCase();
 
   const accountConfig = account?.config ?? {};
@@ -104,6 +146,7 @@ export async function enrichInboundContentWithMedia(params: {
   const maxBytes = resolveInboundMediaMaxBytes(accountConfig);
 
   const mediaPaths: string[] = [];
+  let asrErrorMessage: string | undefined;
 
   // 清理函数：
   // - 入站媒体会在“入站解析阶段”就归档到 inbound/YYYY-MM-DD，并把最终路径写进消息体
@@ -111,6 +154,7 @@ export async function enrichInboundContentWithMedia(params: {
   const makeResult = (text: string) => ({
     text,
     mediaPaths,
+    asrErrorMessage,
     cleanup: async () => {
       try {
         await pruneInboundMediaDir(account);
@@ -186,12 +230,53 @@ export async function enrichInboundContentWithMedia(params: {
     try {
       const mediaId = String((msg as { MediaId?: string }).MediaId ?? "").trim();
       const recognition = String((msg as { Recognition?: string }).Recognition ?? "").trim();
+      const asrCredentials = resolveWecomAppASRCredentials(accountConfig);
 
       if (mediaId) {
         const saved = await downloadWecomMediaToFile(account, mediaId, { maxBytes, prefix: "voice" });
         if (saved.ok && saved.path) {
           const finalPath = await finalizeInboundMedia(account, saved.path);
           mediaPaths.push(finalPath);
+
+          if (asrCredentials) {
+            try {
+              const audio = await readFile(finalPath);
+              const asrConfig: {
+                appId: string;
+                secretId: string;
+                secretKey: string;
+                engineType?: string;
+                voiceFormat: string;
+                timeoutMs?: number;
+              } = {
+                appId: asrCredentials.appId,
+                secretId: asrCredentials.secretId,
+                secretKey: asrCredentials.secretKey,
+                voiceFormat: resolveVoiceFormat(msg, finalPath),
+              };
+              if (asrCredentials.engineType) {
+                asrConfig.engineType = asrCredentials.engineType;
+              }
+              if (typeof asrCredentials.timeoutMs === "number") {
+                asrConfig.timeoutMs = asrCredentials.timeoutMs;
+              }
+              const transcript = await transcribeTencentFlash({
+                audio,
+                config: asrConfig,
+              });
+              const safeTranscript = transcript.trim();
+              if (safeTranscript) {
+                return makeResult(`[voice] saved:${finalPath}\n[recognition] ${safeTranscript}`);
+              }
+            } catch (err) {
+              asrErrorMessage = err instanceof Error ? err.message : String(err);
+              logger?.warn(
+                `[voice-asr] transcription failed accountId=${account.accountId} msgId=${String(msg.msgid ?? msg.MsgId ?? "")} detail=${formatASRErrorLog(err)}`
+              );
+              // ASR 失败时保持兼容回退：优先使用企业微信自带 Recognition，再回退文件路径。
+            }
+          }
+
           // 如果有识别文本，包含它以便 Agent 看到转录内容
           if (recognition) {
             return makeResult(`[voice] saved:${finalPath}\n[recognition] ${recognition}`);
@@ -286,14 +371,16 @@ async function buildInboundBody(params: {
   cfg: PluginConfig;
   account: ResolvedWecomAppAccount;
   msg: WecomAppInboundMessage;
-}): Promise<{ text: string; cleanup: () => Promise<void> }> {
+  logger?: Logger;
+}): Promise<{ text: string; asrErrorMessage?: string; cleanup: () => Promise<void> }> {
   // 尽可能使用增强的消息体（将入站媒体保存到本地）
   const enriched = await enrichInboundContentWithMedia({
     cfg: params.cfg,
     account: params.account,
     msg: params.msg,
+    logger: params.logger,
   });
-  return { text: enriched.text, cleanup: enriched.cleanup };
+  return { text: enriched.text, asrErrorMessage: enriched.asrErrorMessage, cleanup: enriched.cleanup };
 }
 
 /**
@@ -346,8 +433,15 @@ export async function dispatchWecomAppMessage(params: {
     peer: { kind: "dm", id: chatId },
   });
 
-  const { text: rawBody, cleanup } = await buildInboundBody({ cfg: safeCfg, account, msg });
+  const { text: rawBody, asrErrorMessage, cleanup } = await buildInboundBody({ cfg: safeCfg, account, msg, logger });
   const fromLabel = `user:${senderId}`;
+
+  // 与 qqbot 对齐：ASR 出错时主动提示用户并终止后续 agent 分发。
+  if (asrErrorMessage) {
+    hooks.onChunk(buildVoiceASRFallbackReply(asrErrorMessage));
+    await cleanup();
+    return;
+  }
 
   const storePath = channel.session?.resolveStorePath?.(safeCfg.session?.store, {
     agentId: route.agentId,

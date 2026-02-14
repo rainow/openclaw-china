@@ -18,6 +18,18 @@
       "token": { "type": "string" },
       "encodingAESKey": { "type": "string" },
       "receiveId": { "type": "string" },
+      "asr": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "appId": { "type": "string" },
+          "secretId": { "type": "string" },
+          "secretKey": { "type": "string" },
+          "engineType": { "type": "string" },
+          "timeoutMs": { "type": "number" }
+        }
+      },
       "welcomeText": { "type": "string" },
       "dmPolicy": { "type": "string", "enum": ["open", "pairing", "allowlist", "disabled"] },
       "allowFrom": { "type": "array", "items": { "type": "string" } },
@@ -41,6 +53,18 @@
             "token": { "type": "string" },
             "encodingAESKey": { "type": "string" },
             "receiveId": { "type": "string" },
+            "asr": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "appId": { "type": "string" },
+                "secretId": { "type": "string" },
+                "secretKey": { "type": "string" },
+                "engineType": { "type": "string" },
+                "timeoutMs": { "type": "number" }
+              }
+            },
             "welcomeText": { "type": "string" },
             "dmPolicy": { "type": "string", "enum": ["open", "pairing", "allowlist", "disabled"] },
             "allowFrom": { "type": "array", "items": { "type": "string" } },
@@ -55,6 +79,9 @@
   "uiHints": {
     "corpId": { "label": "企业ID (CorpID)" },
     "corpSecret": { "label": "应用Secret", "sensitive": true },
+    "asr.appId": { "label": "ASR App ID" },
+    "asr.secretId": { "label": "ASR Secret ID", "sensitive": true },
+    "asr.secretKey": { "label": "ASR Secret Key", "sensitive": true },
     "agentId": { "label": "应用AgentId" },
     "apiBaseUrl": { "label": "企微 API 基础地址（可选代理）" },
     "token": { "label": "回调Token", "sensitive": true },
