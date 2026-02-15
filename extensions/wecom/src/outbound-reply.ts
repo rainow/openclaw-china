@@ -146,8 +146,18 @@ export function consumeResponseUrl(params: {
   pruneExpiredResponseUrls();
   const key = endpointKey(accountId, to);
   const list = responseEndpoints.get(key) ?? [];
-  const next = list[list.length - 1];
-  return next?.url ?? null;
+  if (list.length === 0) return null;
+
+  // response_url is single-use: consume latest and remove it from the store.
+  const next = list.pop();
+  if (!next?.url) return null;
+
+  if (list.length > 0) {
+    responseEndpoints.set(key, list);
+  } else {
+    responseEndpoints.delete(key);
+  }
+  return next.url;
 }
 
 export async function registerTempLocalMedia(params: {

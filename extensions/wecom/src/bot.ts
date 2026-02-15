@@ -8,6 +8,7 @@ import {
   checkDmPolicy,
   checkGroupPolicy,
   createLogger,
+  extractMediaFromText,
   type Logger,
   resolveExtension,
 } from "@openclaw-china/shared";
@@ -18,6 +19,7 @@ import { decryptWecomMedia } from "./crypto.js";
 import * as os from "os";
 import * as path from "path";
 import * as fsPromises from "fs/promises";
+import * as fs from "fs";
 import {
   resolveAllowFrom,
   resolveGroupAllowFrom,
@@ -25,12 +27,127 @@ import {
   resolveRequireMention,
   type PluginConfig,
 } from "./config.js";
-import { registerResponseUrl } from "./outbound-reply.js";
+import {
+  buildTempMediaUrl,
+  getAccountPublicBaseUrl,
+  registerResponseUrl,
+  registerTempLocalMedia,
+} from "./outbound-reply.js";
 
 export type WecomDispatchHooks = {
-  onChunk: (text: string) => void;
+  onChunk: (text: string) => void | Promise<void>;
   onError?: (err: unknown) => void;
 };
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim());
+}
+
+function detectMediaTypeByPath(mediaPath: string): "image" | "file" {
+  const ext = path.extname(mediaPath.split("?")[0] ?? "").toLowerCase();
+  if ([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"].includes(ext)) {
+    return "image";
+  }
+  return "file";
+}
+
+async function buildPublicMediaUrlForStream(params: {
+  accountId: string;
+  source: string;
+  log?: Logger;
+}): Promise<{ url: string; mediaType: "image" | "file" } | null> {
+  const raw = params.source.trim();
+  if (!raw) return null;
+
+  if (isHttpUrl(raw)) {
+    return {
+      url: raw,
+      mediaType: detectMediaTypeByPath(raw),
+    };
+  }
+
+  if (!path.isAbsolute(raw)) return null;
+  if (!fs.existsSync(raw)) return null;
+
+  const baseUrl = getAccountPublicBaseUrl(params.accountId);
+  if (!baseUrl) {
+    params.log?.warn?.("[wecom] public base URL missing, cannot expose local media in stream");
+    return null;
+  }
+
+  const temp = await registerTempLocalMedia({
+    filePath: raw,
+    fileName: path.basename(raw),
+  });
+  const url = buildTempMediaUrl({
+    baseUrl,
+    id: temp.id,
+    token: temp.token,
+    fileName: temp.fileName,
+  });
+  return {
+    url,
+    mediaType: detectMediaTypeByPath(temp.fileName),
+  };
+}
+
+async function normalizeChunkForWecomStream(params: {
+  accountId: string;
+  text: string;
+  payloadMediaUrls?: string[];
+  log?: Logger;
+}): Promise<string> {
+  const rawText = String(params.text ?? "");
+  const parseResult = extractMediaFromText(rawText, {
+    removeFromText: true,
+    checkExists: true,
+    existsSync: (p: string) => fs.existsSync(p),
+    parseMediaLines: true,
+    parseMarkdownImages: true,
+    parseHtmlImages: true,
+    parseBarePaths: true,
+    parseMarkdownLinks: true,
+  });
+
+  const parts: string[] = [];
+  if (parseResult.text.trim()) {
+    parts.push(parseResult.text.trim());
+  }
+
+  const sourceSet = new Set<string>();
+  for (const media of parseResult.all) {
+    const source = (media.localPath ?? media.source ?? "").trim();
+    if (source) sourceSet.add(source);
+  }
+  for (const extra of params.payloadMediaUrls ?? []) {
+    const source = String(extra ?? "").trim();
+    if (source) sourceSet.add(source);
+  }
+
+  for (const source of sourceSet) {
+    try {
+      const mapped = await buildPublicMediaUrlForStream({
+        accountId: params.accountId,
+        source,
+        log: params.log,
+      });
+      if (!mapped) {
+        parts.push(source);
+        continue;
+      }
+      if (mapped.mediaType === "image") {
+        parts.push(`![](${mapped.url})`);
+      } else {
+        parts.push(`[下载文件](${mapped.url})`);
+      }
+    } catch (err) {
+      params.log?.warn?.(`[wecom] failed to map stream media source: ${String(err)}`);
+      parts.push(source);
+    }
+  }
+
+  return parts.join("\n\n").trim();
+}
 
 export function extractWecomContent(msg: WecomInboundMessage): string {
   const msgtype = String(msg.msgtype ?? "").toLowerCase();
@@ -92,6 +209,33 @@ function resolveChatId(msg: WecomInboundMessage, senderId: string, chatType: "di
     return msg.chatid?.trim() || "unknown";
   }
   return senderId;
+}
+
+function resolveMentionedBot(msg: WecomInboundMessage): boolean {
+  const msgtype = String(msg.msgtype ?? "").toLowerCase();
+
+  // Event callbacks (template_card_event/feedback_event/enter_chat) are not mention-based.
+  if (msgtype === "event") return true;
+
+  const mentionRe = /@[^\s]+/;
+  if (msgtype === "text") {
+    const content = String((msg as { text?: { content?: string } }).text?.content ?? "");
+    return mentionRe.test(content);
+  }
+
+  if (msgtype === "mixed") {
+    const items = (msg as { mixed?: { msg_item?: unknown } }).mixed?.msg_item;
+    if (!Array.isArray(items)) return false;
+    return items.some((item) => {
+      if (!item || typeof item !== "object") return false;
+      const typed = item as { msgtype?: string; text?: { content?: string } };
+      if (String(typed.msgtype ?? "").toLowerCase() !== "text") return false;
+      const content = String(typed.text?.content ?? "");
+      return mentionRe.test(content);
+    });
+  }
+
+  return false;
 }
 
 function buildInboundBody(msg: WecomInboundMessage): string {
@@ -180,7 +324,7 @@ export async function dispatchWecomMessage(params: {
       conversationId: chatId,
       groupAllowFrom,
       requireMention,
-      mentionedBot: true,
+      mentionedBot: resolveMentionedBot(msg),
     });
 
     if (!policyResult.allowed) {
@@ -353,13 +497,28 @@ export async function dispatchWecomMessage(params: {
       ctx: ctxPayload,
       cfg: safeCfg,
       dispatcherOptions: {
-        deliver: async (payload: { text?: string }) => {
+        deliver: async (payload: { text?: string; mediaUrl?: string; mediaUrls?: string[] }) => {
           const rawText = payload.text ?? "";
-          if (!rawText.trim()) return;
+          const payloadMediaUrls = [
+            ...(Array.isArray(payload.mediaUrls) ? payload.mediaUrls : []),
+            ...(payload.mediaUrl ? [payload.mediaUrl] : []),
+          ]
+            .map((entry) => String(entry ?? "").trim())
+            .filter(Boolean);
+
+          if (!rawText.trim() && payloadMediaUrls.length === 0) return;
+
           const converted = channel.text?.convertMarkdownTables && tableMode
             ? channel.text.convertMarkdownTables(rawText, tableMode)
             : rawText;
-          hooks.onChunk(converted);
+          const normalized = await normalizeChunkForWecomStream({
+            accountId: account.accountId,
+            text: converted,
+            payloadMediaUrls,
+            log: logger,
+          });
+          if (!normalized.trim()) return;
+          await hooks.onChunk(normalized);
         },
         onError: (err: unknown, info: { kind: string }) => {
           hooks.onError?.(err);

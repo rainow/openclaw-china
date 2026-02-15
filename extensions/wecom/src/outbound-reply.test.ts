@@ -41,7 +41,7 @@ describe("wecom outbound reply store", () => {
     clearOutboundReplyState();
   });
 
-  it("returns latest response_url and keeps it reusable", () => {
+  it("consumes response_url once and removes it from the store", () => {
     registerResponseUrl({
       accountId: "default",
       to: "user:alice",
@@ -64,7 +64,13 @@ describe("wecom outbound reply store", () => {
         accountId: "default",
         to: "user:alice",
       })
-    ).toBe("https://reply.local/2");
+    ).toBe("https://reply.local/1");
+    expect(
+      consumeResponseUrl({
+        accountId: "default",
+        to: "user:alice",
+      })
+    ).toBeNull();
   });
 
   it("captures public base url from forwarded headers", () => {

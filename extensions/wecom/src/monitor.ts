@@ -417,6 +417,29 @@ export async function handleWecomWebhookRequest(req: IncomingMessage, res: Serve
       return true;
     }
 
+    const core = tryGetWecomRuntime();
+    if (core) {
+      dispatchWecomMessage({
+        cfg: target.config,
+        account: target.account,
+        msg,
+        core,
+        hooks: {
+          onChunk: () => {
+            // Event callbacks are acknowledged with empty payload; business side
+            // can still use response_url for active replies if needed.
+          },
+          onError: (err: unknown) => {
+            logger.error(`wecom event dispatch failed: ${String(err)}`);
+          },
+        },
+        log: target.runtime.log,
+        error: target.runtime.error,
+      }).catch((err) => {
+        logger.error(`wecom event dispatch failed: ${String(err)}`);
+      });
+    }
+
     jsonOk(
       res,
       buildEncryptedJsonReply({
@@ -446,22 +469,39 @@ export async function handleWecomWebhookRequest(req: IncomingMessage, res: Serve
   if (core) {
     const state = streams.get(streamId);
     if (state) state.started = true;
+    let chunkFlush = Promise.resolve();
+
+    const markStreamFinished = async (err?: unknown): Promise<void> => {
+      await chunkFlush.catch(() => undefined);
+      const current = streams.get(streamId);
+      if (!current) return;
+      if (err) {
+        current.error = err instanceof Error ? err.message : String(err);
+        current.content = current.content || `Error: ${current.error}`;
+      }
+      current.finished = true;
+      current.updatedAt = Date.now();
+    };
 
     const hooks = {
       onChunk: (text: string) => {
-        const current = streams.get(streamId);
-        if (!current) return;
-        appendStreamContent(current, text);
-        target.statusSink?.({ lastOutboundAt: Date.now() });
+        chunkFlush = chunkFlush.then(async () => {
+          const current = streams.get(streamId);
+          if (!current) return;
+          appendStreamContent(current, text);
+          target.statusSink?.({ lastOutboundAt: Date.now() });
+        });
+        return chunkFlush;
       },
       onError: (err: unknown) => {
-        const current = streams.get(streamId);
-        if (current) {
-          current.error = err instanceof Error ? err.message : String(err);
-          current.content = current.content || `Error: ${current.error}`;
-          current.finished = true;
-          current.updatedAt = Date.now();
-        }
+        chunkFlush = chunkFlush.then(async () => {
+          const current = streams.get(streamId);
+          if (current) {
+            current.error = err instanceof Error ? err.message : String(err);
+            current.content = current.content || `Error: ${current.error}`;
+            current.updatedAt = Date.now();
+          }
+        });
         logger.error(`wecom agent failed: ${String(err)}`);
       },
     };
@@ -476,20 +516,10 @@ export async function handleWecomWebhookRequest(req: IncomingMessage, res: Serve
       error: target.runtime.error,
     })
       .then(() => {
-        const current = streams.get(streamId);
-        if (current) {
-          current.finished = true;
-          current.updatedAt = Date.now();
-        }
+        void markStreamFinished();
       })
       .catch((err) => {
-        const current = streams.get(streamId);
-        if (current) {
-          current.error = err instanceof Error ? err.message : String(err);
-          current.content = current.content || `Error: ${current.error}`;
-          current.finished = true;
-          current.updatedAt = Date.now();
-        }
+        void markStreamFinished(err);
         logger.error(`wecom agent failed: ${String(err)}`);
       });
   } else {

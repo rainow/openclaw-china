@@ -112,6 +112,26 @@ function detectOutboundMediaType(mediaUrl: string, mimeType?: string): OutboundM
   return "file";
 }
 
+function buildMediaMarkdown(params: {
+  mediaUrl: string;
+  mediaType: OutboundMediaType;
+  caption?: string;
+}): string {
+  const parts: string[] = [];
+  const caption = params.caption?.trim();
+  if (caption) {
+    parts.push(caption);
+  }
+
+  if (params.mediaType === "image") {
+    parts.push(`![](${params.mediaUrl})`);
+  } else {
+    parts.push(`[下载文件](${params.mediaUrl})`);
+  }
+
+  return parts.join("\n\n").trim();
+}
+
 function resolveReplyTargetToken(parsed: ParsedDirectTarget): string {
   return `${parsed.kind}:${parsed.id}`;
 }
@@ -376,12 +396,21 @@ export const wecomPlugin = {
         };
       }
       try {
-        await postWecomResponse(responseUrl, {
-          msgtype: "text",
-          text: {
-            content: params.text,
-          },
-        });
+        const useMarkdown = params.options?.markdown !== false;
+        const payload = useMarkdown
+          ? {
+              msgtype: "markdown",
+              markdown: {
+                content: params.text,
+              },
+            }
+          : {
+              msgtype: "text",
+              text: {
+                content: params.text,
+              },
+            };
+        await postWecomResponse(responseUrl, payload);
         return {
           channel: "wecom",
           ok: true,
@@ -465,32 +494,20 @@ export const wecomPlugin = {
         }
 
         const mediaType = detectOutboundMediaType(publicMediaUrl, params.mimeType);
-        const caption = params.text?.trim();
-        if (caption) {
-          await postWecomResponse(responseUrl, {
-            msgtype: "text",
-            text: {
-              content: caption,
-            },
-          });
-        }
-        const payload =
-          mediaType === "image"
-            ? {
-                msgtype: "image",
-                image: {
-                  url: publicMediaUrl,
-                },
-              }
-            : {
-                msgtype: "file",
-                file: {
-                  url: publicMediaUrl,
-                },
-              };
-
-        await postWecomResponse(responseUrl, payload);
-        console.log(`[wecom] sendMedia success: type=${mediaType}, to=${resolveReplyTargetToken(parsed)}`);
+        const markdown = buildMediaMarkdown({
+          mediaUrl: publicMediaUrl,
+          mediaType,
+          caption: params.text,
+        });
+        await postWecomResponse(responseUrl, {
+          msgtype: "markdown",
+          markdown: {
+            content: markdown,
+          },
+        });
+        console.log(
+          `[wecom] sendMedia success (markdown): type=${mediaType}, to=${resolveReplyTargetToken(parsed)}`
+        );
         return {
           channel: "wecom",
           ok: true,
@@ -498,6 +515,79 @@ export const wecomPlugin = {
         };
       } catch (err) {
         console.error(`[wecom] sendMedia failed: ${formatError(err)}`);
+        return {
+          channel: "wecom",
+          ok: false,
+          messageId: "",
+          error: err instanceof Error ? err : new Error(String(err)),
+        };
+      }
+    },
+
+    sendTemplateCard: async (params: {
+      cfg: PluginConfig;
+      accountId?: string;
+      to: string;
+      templateCard: Record<string, unknown>;
+    }): Promise<{
+      channel: string;
+      ok: boolean;
+      messageId: string;
+      error?: Error;
+    }> => {
+      console.log(`[wecom] sendTemplateCard called: to=${params.to}`);
+      const account = resolveWecomAccount({ cfg: params.cfg, accountId: params.accountId });
+      const parsed = parseDirectTarget(params.to);
+      if (!parsed) {
+        const error = new Error(`Unsupported target for WeCom: ${params.to}`);
+        console.error(`[wecom] sendTemplateCard failed: ${error.message}`);
+        return {
+          channel: "wecom",
+          ok: false,
+          messageId: "",
+          error,
+        };
+      }
+      if (parsed.kind !== "user") {
+        const error = new Error("WeCom active template_card reply is only supported in single chat targets (user:<userid>).");
+        console.error(`[wecom] sendTemplateCard failed: ${error.message}`);
+        return {
+          channel: "wecom",
+          ok: false,
+          messageId: "",
+          error,
+        };
+      }
+
+      const responseUrl = consumeResponseUrl({
+        accountId: account.accountId,
+        to: resolveReplyTargetToken(parsed),
+      });
+      if (!responseUrl) {
+        const error = new Error(
+          `No response_url available for ${resolveReplyTargetToken(parsed)}. WeCom smart bot can only reply after inbound messages.`
+        );
+        console.error(`[wecom] sendTemplateCard failed: ${error.message}`);
+        return {
+          channel: "wecom",
+          ok: false,
+          messageId: "",
+          error,
+        };
+      }
+
+      try {
+        await postWecomResponse(responseUrl, {
+          msgtype: "template_card",
+          template_card: params.templateCard ?? {},
+        });
+        return {
+          channel: "wecom",
+          ok: true,
+          messageId: `response:${Date.now()}`,
+        };
+      } catch (err) {
+        console.error(`[wecom] sendTemplateCard failed: ${formatError(err)}`);
         return {
           channel: "wecom",
           ok: false,
