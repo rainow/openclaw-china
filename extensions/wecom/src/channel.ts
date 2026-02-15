@@ -131,6 +131,11 @@ async function postWecomResponse(responseUrl: string, payload: unknown): Promise
   }
 }
 
+function formatError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
 const meta = {
   id: "wecom",
   label: "WeCom",
@@ -341,14 +346,17 @@ export const wecomPlugin = {
       messageId: string;
       error?: Error;
     }> => {
+      console.log(`[wecom] sendText called: to=${params.to}, textLen=${params.text.length}`);
       const account = resolveWecomAccount({ cfg: params.cfg, accountId: params.accountId });
       const parsed = parseDirectTarget(params.to);
       if (!parsed) {
+        const error = new Error(`Unsupported target for WeCom: ${params.to}`);
+        console.error(`[wecom] sendText failed: ${error.message}`);
         return {
           channel: "wecom",
           ok: false,
           messageId: "",
-          error: new Error(`Unsupported target for WeCom: ${params.to}`),
+          error,
         };
       }
       const responseUrl = consumeResponseUrl({
@@ -356,13 +364,15 @@ export const wecomPlugin = {
         to: resolveReplyTargetToken(parsed),
       });
       if (!responseUrl) {
+        const error = new Error(
+          `No response_url available for ${resolveReplyTargetToken(parsed)}. WeCom smart bot can only reply after inbound messages.`
+        );
+        console.error(`[wecom] sendText failed: ${error.message}`);
         return {
           channel: "wecom",
           ok: false,
           messageId: "",
-          error: new Error(
-            `No response_url available for ${resolveReplyTargetToken(parsed)}. WeCom smart bot can only reply after inbound messages.`
-          ),
+          error,
         };
       }
       try {
@@ -378,6 +388,7 @@ export const wecomPlugin = {
           messageId: `response:${Date.now()}`,
         };
       } catch (err) {
+        console.error(`[wecom] sendText failed: ${formatError(err)}`);
         return {
           channel: "wecom",
           ok: false,
@@ -400,14 +411,17 @@ export const wecomPlugin = {
       messageId: string;
       error?: Error;
     }> => {
+      console.log(`[wecom] sendMedia called: to=${params.to}, mediaUrl=${params.mediaUrl}`);
       const account = resolveWecomAccount({ cfg: params.cfg, accountId: params.accountId });
       const parsed = parseDirectTarget(params.to);
       if (!parsed) {
+        const error = new Error(`Unsupported target for WeCom: ${params.to}`);
+        console.error(`[wecom] sendMedia failed: ${error.message}`);
         return {
           channel: "wecom",
           ok: false,
           messageId: "",
-          error: new Error(`Unsupported target for WeCom: ${params.to}`),
+          error,
         };
       }
       const responseUrl = consumeResponseUrl({
@@ -415,13 +429,15 @@ export const wecomPlugin = {
         to: resolveReplyTargetToken(parsed),
       });
       if (!responseUrl) {
+        const error = new Error(
+          `No response_url available for ${resolveReplyTargetToken(parsed)}. WeCom smart bot can only reply after inbound messages.`
+        );
+        console.error(`[wecom] sendMedia failed: ${error.message}`);
         return {
           channel: "wecom",
           ok: false,
           messageId: "",
-          error: new Error(
-            `No response_url available for ${resolveReplyTargetToken(parsed)}. WeCom smart bot can only reply after inbound messages.`
-          ),
+          error,
         };
       }
 
@@ -474,12 +490,14 @@ export const wecomPlugin = {
               };
 
         await postWecomResponse(responseUrl, payload);
+        console.log(`[wecom] sendMedia success: type=${mediaType}, to=${resolveReplyTargetToken(parsed)}`);
         return {
           channel: "wecom",
           ok: true,
           messageId: `response:${Date.now()}`,
         };
       } catch (err) {
+        console.error(`[wecom] sendMedia failed: ${formatError(err)}`);
         return {
           channel: "wecom",
           ok: false,
