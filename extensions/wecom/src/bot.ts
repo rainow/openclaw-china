@@ -17,6 +17,7 @@ import type { PluginRuntime } from "./runtime.js";
 import type { ResolvedWecomAccount, WecomInboundMessage, WecomDmPolicy } from "./types.js";
 import { decryptWecomMedia } from "./crypto.js";
 import * as path from "path";
+import * as os from "os";
 import * as fsPromises from "fs/promises";
 import * as fs from "fs";
 import {
@@ -38,6 +39,18 @@ export type WecomDispatchHooks = {
   onChunk: (text: string) => void | Promise<void>;
   onError?: (err: unknown) => void;
 };
+
+function resolveOpenClawStateDir(): string {
+  const override = process.env.OPENCLAW_STATE_DIR?.trim() || process.env.CLAWDBOT_STATE_DIR?.trim();
+  if (override) {
+    return path.resolve(override);
+  }
+  return path.join(os.homedir(), ".openclaw");
+}
+
+function resolveWecomInboundMediaDir(): string {
+  return path.join(resolveOpenClawStateDir(), "media", "inbound");
+}
 
 function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value.trim());
@@ -494,7 +507,7 @@ export async function dispatchWecomMessage(params: {
       },
     });
   } finally {
-    // 媒体文件保留在 /tmp/wecom/yyyymm/ 供后续使用，不再自动清理
+    // 媒体文件保留在 $OPENCLAW_STATE_DIR/media/inbound 供后续使用，不再自动清理
   }
 }
 
@@ -607,7 +620,7 @@ export async function downloadAndDecryptMedia(params: {
     throw new Error(`解密失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 步骤 3: 保存到按月归档目录
+  // 步骤 3: 保存到 OpenClaw 状态目录下的统一媒体目录
 
   // 从 Content-Disposition 响应头中提取原始文件名
   const sanitizeFileName = (input?: string): string | undefined => {
@@ -638,22 +651,20 @@ export async function downloadAndDecryptMedia(params: {
   }
 
   // 确定文件扩展名
-  let extension = '';
+  let extension = "";
   if (originalFileName) {
-    const lastDotIndex = originalFileName.lastIndexOf('.');
+    const lastDotIndex = originalFileName.lastIndexOf(".");
     if (lastDotIndex > 0) {
       extension = originalFileName.slice(lastDotIndex); // 保留 .xxx
     }
   }
   // 如果没有扩展名，从 contentType 推断
   if (!extension) {
-    extension = resolveExtension(contentType, '');
+    extension = resolveExtension(contentType, "");
   }
 
-  // 生成月份目录：/tmp/wecom/yyyymm/
-  const now = new Date();
-  const yearMonth = now.toISOString().slice(0, 7).replace('-', ''); // yyyymm 格式
-  const wecomDir = path.join('/tmp', 'wecom', yearMonth);
+  // 统一落盘到: $OPENCLAW_STATE_DIR/media/inbound
+  const wecomDir = resolveWecomInboundMediaDir();
 
   // 确保目录存在
   await fsPromises.mkdir(wecomDir, { recursive: true });
@@ -661,7 +672,7 @@ export async function downloadAndDecryptMedia(params: {
   // 生成文件名：原始文件名-时间戳.扩展名（防止重名）
   const baseFileName = originalFileName || `wecom-media`;
   // 移除原始文件名的扩展名（如果有的话），因为我们已经单独处理了
-  const baseNameWithoutExt = baseFileName.replace(/\.[-.\w]+$/, '');
+  const baseNameWithoutExt = baseFileName.replace(/\.[-.\w]+$/, "");
   const timestamp = Date.now();
   const safeFileName = `${baseNameWithoutExt}-${timestamp}${extension}`;
   const resolvedDir = path.resolve(wecomDir);
