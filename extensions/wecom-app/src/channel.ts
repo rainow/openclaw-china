@@ -29,6 +29,11 @@ type ParsedDirectTarget = {
   userId: string;
 };
 
+// 裸目标（不带 user: 前缀）仅接受“机器可投递 ID”风格，避免把显示名误当作投递目标。
+const BARE_USER_ID_RE = /^[a-z0-9][a-z0-9._@-]{0,63}$/;
+// 显式 user: 前缀时放宽大小写，兼容历史 UserID。
+const EXPLICIT_USER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$/;
+
 function looksLikeEmail(raw: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw.trim());
 }
@@ -62,10 +67,14 @@ function parseDirectTarget(rawTarget: string): ParsedDirectTarget | null {
   }
 
   if (raw.startsWith("group:")) return null;
-  if (raw.startsWith("user:")) raw = raw.slice(5);
+  const explicitUserPrefix = raw.startsWith("user:");
+  if (explicitUserPrefix) raw = raw.slice(5);
 
   const userId = raw.trim();
   if (!userId) return null;
+  if (/\s/.test(userId)) return null;
+  if (!explicitUserPrefix && !BARE_USER_ID_RE.test(userId)) return null;
+  if (explicitUserPrefix && !EXPLICIT_USER_ID_RE.test(userId)) return null;
 
   return { accountId, userId };
 }
@@ -159,6 +168,26 @@ export const wecomAppPlugin = {
     polls: false,
     /** 自建应用支持主动发送 */
     activeSend: true,
+  },
+
+  messaging: {
+    normalizeTarget: (raw: string): string | undefined => {
+      const parsed = parseDirectTarget(raw);
+      if (!parsed) return undefined;
+      return `user:${parsed.userId}${parsed.accountId ? `@${parsed.accountId}` : ""}`;
+    },
+    targetResolver: {
+      looksLikeId: (raw: string, normalized?: string) => {
+        const candidate = (normalized ?? raw).trim();
+        return Boolean(parseDirectTarget(candidate));
+      },
+      hint: "Use WeCom UserID only: user:<userid> (optional @accountId). Do not use display names.",
+    },
+    formatTargetDisplay: (params: { target: string; display?: string }) => {
+      const parsed = parseDirectTarget(params.target);
+      if (!parsed) return params.display?.trim() || params.target;
+      return `user:${parsed.userId}`;
+    },
   },
 
   configSchema: WecomAppConfigJsonSchema,
@@ -263,11 +292,10 @@ export const wecomAppPlugin = {
    * 目录解析 - 用于将 wecom-app:XXX 格式的 target 解析为可投递目标
    *
    * 支持的输入格式：
-   * - "wecom-app:user:xxx" → { channel: "wecom-app", to: "user:xxx" }
-   * - "wecom-app:xxx" → { channel: "wecom-app", to: "user:xxx" }
-   * - "user:xxx" → { channel: "wecom-app", to: "user:xxx" }
-   * - "xxx" (裸ID) → { channel: "wecom-app", to: "user:xxx" }
-   * - 带 accountId: "user:xxx@account1" → { channel: "wecom-app", accountId: "account1", to: "user:xxx" }
+   * - "wecom-app:user:xxx" → { channel: "wecom-app", to: "xxx" }
+   * - "user:xxx" → { channel: "wecom-app", to: "xxx" }
+   * - "xxx" (仅小写 ID 风格) → { channel: "wecom-app", to: "xxx" }
+   * - 带 accountId: "user:xxx@account1" → { channel: "wecom-app", accountId: "account1", to: "xxx" }
    */
   directory: {
     /**
@@ -275,20 +303,7 @@ export const wecomAppPlugin = {
      * 用于框架层判断是否调用 resolveTarget
      */
     canResolve: (params: { target: string }): boolean => {
-      const raw = (params.target ?? "").trim();
-      if (!raw) return false;
-
-      // 明确以 wecom-app: 开头的目标
-      if (raw.startsWith("wecom-app:")) return true;
-
-      // 不以其他 channel 前缀开头（如 dingtalk:, feishu: 等）
-      const knownChannelPrefixes = ["dingtalk:", "feishu:", "wecom:", "qq:", "telegram:", "discord:", "slack:"];
-      for (const prefix of knownChannelPrefixes) {
-        if (raw.startsWith(prefix)) return false;
-      }
-
-      // 接受 user: 前缀或裸 ID（裸 ID 会自动转换为 user:）
-      return true;
+      return Boolean(parseDirectTarget(params.target));
     },
 
     /**
@@ -356,7 +371,7 @@ export const wecomAppPlugin = {
     getTargetFormats: (): string[] => [
       "wecom-app:user:<userId>",
       "user:<userId>",
-      "<userId>",  // 裸 ID，默认当作用户 ID
+      "<userid-lowercase>",
     ],
   },
 

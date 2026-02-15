@@ -567,6 +567,24 @@ export async function dispatchWecomAppMessage(params: {
     [key: string]: unknown;
   };
 
+  // 兜底当前会话目标，确保 message 工具在未显式指定 to 时可回到当前会话。
+  const ctxTo =
+    typeof ctxPayload.To === "string" && ctxPayload.To.trim()
+      ? ctxPayload.To.trim()
+      : undefined;
+  const ctxOriginatingTo =
+    typeof ctxPayload.OriginatingTo === "string" && ctxPayload.OriginatingTo.trim()
+      ? ctxPayload.OriginatingTo.trim()
+      : undefined;
+  const stableTo = ctxOriginatingTo ?? ctxTo ?? to;
+  ctxPayload.To = stableTo;
+  ctxPayload.OriginatingTo = stableTo;
+
+  // 对齐钉钉/Telegram 的“按可投递 ID 路由”风格，避免显示名影响目标推断。
+  ctxPayload.SenderId = senderId;
+  ctxPayload.SenderName = senderId;
+  ctxPayload.ConversationLabel = fromLabel;
+
   // DM policy passed above, so commands from this sender are eligible.
   // Without this flag, OpenClaw defaults CommandAuthorized to false.
   ctxPayload.CommandAuthorized = true;
@@ -597,7 +615,7 @@ export async function dispatchWecomAppMessage(params: {
     const updateLastRoute = {
       sessionKey: mainSessionKey ?? route.sessionKey,
       channel: "wecom-app",
-      to: (ctxPayload.OriginatingTo ?? ctxPayload.To ?? `user:${senderId}`) as string,
+      to: stableTo,
       accountId: route.accountId ?? account.accountId,
     };
     const recordSessionKeyRaw = ctxPayload.SessionKey ?? route.sessionKey;
